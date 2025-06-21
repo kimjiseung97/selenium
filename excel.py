@@ -18,3 +18,4 @@ for i in range(10):
 
 #저장
 xlsxFile.save('result.xlsx')
+
