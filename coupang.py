@@ -1,6 +1,7 @@
 import math
 import time
 import re
+from tkinter import ttk
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -8,6 +9,61 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import UnexpectedAlertPresentException, NoSuchElementException
 from openpyxl import Workbook
 from selenium.webdriver.chrome.service import Service as ChromeService
+import tkinter as tk
+from tkinter import messagebox, scrolledtext
+import threading
+
+class ReviewApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("쿠팡 리뷰 수집기")
+        self.root.geometry("600x400")
+        self.root.resizable(False, False)
+        self.url_label = tk.Label(root, text="쿠팡 상품 URL:")
+        self.url_label.pack(pady=5)
+        self.sort_label = tk.Label(root, text="리뷰 정렬 기준:")
+        self.sort_label.pack(pady=5)
+        self.sort_option = ttk.Combobox(root, values=["베스트순", "최신순"], state="readonly")
+        self.sort_option.current(0)  # 기본값: 베스트순
+        self.sort_option.pack(pady=5)
+        self.url_entry = tk.Entry(root, width=80)
+        self.url_entry.pack(pady=5)
+
+        self.start_button = tk.Button(root, text="리뷰 수집 시작", command=self.start_scraping)
+        self.start_button.pack(pady=5)
+
+        self.log_area = scrolledtext.ScrolledText(root, width=80, height=15)
+        self.log_area.pack(padx=10, pady=10)
+
+    def log(self, message):
+        self.log_area.insert(tk.END, message + "\n")
+        self.log_area.see(tk.END)
+
+    def start_scraping(self):
+        url = self.url_entry.get().strip()
+        sort = self.sort_option.get()
+        if "coupang.com" not in url:
+            messagebox.showerror("URL 오류", "쿠팡 상품 URL을 입력하세요.")
+            return
+
+        thread = threading.Thread(target=self.scrape_reviews, args=(url,sort))
+        thread.start()
+
+    def scrape_reviews(self, url, sort):
+        self.log("크롬 드라이버 시작 중...")
+        driver = setup_driver()
+        self.log("리뷰 수집 시작...")
+
+        try:
+            reviews = crawl_reviews(url, driver, log_func=self.log,sort=sort)
+            if reviews:
+                self.log(f"총 수집된 리뷰 수: {len(reviews)}")
+                save_to_excel(reviews)
+                self.log("엑셀 저장 완료: coupang_reviews.xlsx")
+            else:
+                self.log("리뷰를 수집하지 못했습니다.")
+        except Exception as e:
+            self.log(f"에러 발생: {e}")
 
 
 def setup_driver():
@@ -84,7 +140,7 @@ def click_next_page(driver, current_page):
     return current_page
         
 
-def crawl_reviews(url,driver):
+def crawl_reviews(url,driver,log_func=print,sort="베스트순"):
     driver.get(url)
     time.sleep(2)
     
@@ -93,22 +149,37 @@ def crawl_reviews(url,driver):
             EC.element_to_be_clickable((By.XPATH, '//a[contains(text(), "상품평")]'))
         ).click()
         time.sleep(2)
+
+        sort_xpath_map = {
+            "베스트순": "//div[@class='review-order-container']/button[normalize-space(text())='베스트순']",
+            "최신순": "//div[@class='review-order-container']/button[normalize-space(text())='최신순']"
+        }
+        
+        sort_xpath = sort_xpath_map.get(sort)
+        if sort_xpath:
+            log_func(f"정렬 기준 선택: {sort}")
+            sort_tab = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable((By.XPATH, sort_xpath))
+            )
+            driver.execute_script("arguments[0].click();", sort_tab)
+            time.sleep(1.5)
     except UnexpectedAlertPresentException:
         try:
             alert = driver.switch_to.alert
-            print("❌ 쿠팡에서 차단되었습니다. Alert 메시지:", alert.text)
+            log_func(f"쿠팡에서 차단되었습니다. Alert 메시지: {alert.text}")
             alert.accept()
         except:
             pass
         driver.quit()
         return []
     except Exception as e:
-        print("❌ 리뷰 탭 진입 실패:", e)
+        log_func(f"리뷰 탭 진입 실패: {e}")
         driver.quit()
         return []
 
     reviews = []
     try:
+        max_review_count = 1500;
         total_review_count = get_review_totalcount(driver)
         total_pages = math.ceil(total_review_count / 10)
         current_page = 1
@@ -148,8 +219,10 @@ def crawl_reviews(url,driver):
                         "평점": rating,
                         "리뷰내용": re.sub(r"[\n\t]", "", content.strip())
                     })
-                print(f"{len(reviews):3}. 작성자: {username}")
-                print(f" 현재 수집한 리뷰 수: {len(reviews)} / 현재 페이지: {current_page}")
+                log_func(f"현재 수집한 리뷰 수: {len(reviews)} / 현재 페이지: {current_page}")
+                if len(reviews) >= max_review_count:
+                    log_func("최대 리뷰 개수에 도달했습니다 크롤링을 종료합니다")
+                    return reviews
             current_page = click_next_page(driver, current_page)
     except Exception as e:
         driver.quit()
@@ -164,16 +237,9 @@ def crawl_reviews(url,driver):
                 
                 
 if __name__ == "__main__":
-    url = input("크롤링할 쿠팡 상품 URL을 입력하세요:\n").strip()
-    driver = setup_driver()
-    if "coupang.com" not in url:
-        print("❌ 유효한 쿠팡 상품 URL이 아닙니다.")
-        driver.quit()
-    else:
-        review_data = crawl_reviews(url,driver)
-        if review_data:
-            save_to_excel(review_data)
-        driver.quit()
+    root = tk.Tk()
+    app = ReviewApp(root)
+    root.mainloop()
 
 
 
