@@ -26,6 +26,15 @@ class ReviewApp:
         self.sort_option = ttk.Combobox(root, values=["베스트순", "최신순"], state="readonly")
         self.sort_option.current(0)  # 기본값: 베스트순
         self.sort_option.pack(pady=5)
+        self.review_count_label = tk.Label(root, text="수집 리뷰 갯수:")
+        self.review_count_label.pack(pady=5)
+        self.review_count = ttk.Combobox(
+            root,
+            values=[str(i) for i in range(100, 1600, 100)],
+            state="readonly"
+        )
+        self.review_count.current(0)
+        self.review_count.pack(pady=5)
         self.url_entry = tk.Entry(root, width=80)
         self.url_entry.pack(pady=5)
 
@@ -37,25 +46,31 @@ class ReviewApp:
 
     def log(self, message):
         self.log_area.insert(tk.END, message + "\n")
-        self.log_area.see(tk.END)
+        self.log_area.see(tk.END)        
 
     def start_scraping(self):
         url = self.url_entry.get().strip()
         sort = self.sort_option.get()
+        count = self.review_count.get()  
+        
+
         if "coupang.com" not in url:
             messagebox.showerror("URL 오류", "쿠팡 상품 URL을 입력하세요.")
             return
-
-        thread = threading.Thread(target=self.scrape_reviews, args=(url,sort))
+        
+        
+        
+        count = int(count)        
+        thread = threading.Thread(target=self.scrape_reviews, args=(url,sort,count))
         thread.start()
 
-    def scrape_reviews(self, url, sort):
+    def scrape_reviews(self, url, sort,count):
         self.log("크롬 드라이버 시작 중...")
         driver = setup_driver()
         self.log("리뷰 수집 시작...")
 
         try:
-            reviews = crawl_reviews(url, driver, log_func=self.log,sort=sort)
+            reviews = crawl_reviews(url, driver, log_func=self.log,sort=sort,count=count)
             if reviews:
                 self.log(f"총 수집된 리뷰 수: {len(reviews)}")
                 save_to_excel(reviews)
@@ -140,7 +155,7 @@ def click_next_page(driver, current_page):
     return current_page
         
 
-def crawl_reviews(url,driver,log_func=print,sort="베스트순"):
+def crawl_reviews(url,driver,log_func=print,sort="베스트순",count=100):
     driver.get(url)
     time.sleep(2)
     
@@ -179,8 +194,11 @@ def crawl_reviews(url,driver,log_func=print,sort="베스트순"):
 
     reviews = []
     try:
-        max_review_count = 1500;
+        
         total_review_count = get_review_totalcount(driver)
+        if count :
+            max_review_count = count
+            
         total_pages = math.ceil(total_review_count / 10)
         current_page = 1
         for _ in range(1, total_pages + 1):
