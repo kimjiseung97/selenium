@@ -1,3 +1,4 @@
+from datetime import datetime
 import math
 import time
 import re
@@ -19,24 +20,40 @@ class ReviewApp:
         self.root.title("쿠팡 리뷰 수집기")
         self.root.geometry("600x400")
         self.root.resizable(False, False)
-        self.url_label = tk.Label(root, text="쿠팡 상품 URL:")
-        self.url_label.pack(pady=5)
-        self.sort_label = tk.Label(root, text="리뷰 정렬 기준:")
-        self.sort_label.pack(pady=5)
-        self.sort_option = ttk.Combobox(root, values=["베스트순", "최신순"], state="readonly")
-        self.sort_option.current(0)  # 기본값: 베스트순
-        self.sort_option.pack(pady=5)
-        self.review_count_label = tk.Label(root, text="수집 리뷰 갯수:")
-        self.review_count_label.pack(pady=5)
-        self.review_count = ttk.Combobox(
-            root,
-            values=[str(i) for i in range(100, 1600, 100)],
-            state="readonly"
-        )
+
+        # 입력 요소를 담을 프레임
+        form_frame = tk.Frame(root)
+        form_frame.pack(pady=20)
+
+        # URL 입력
+        tk.Label(form_frame, text="쿠팡 상품 URL:").grid(row=0, column=0, padx=10, pady=5, sticky="e")
+        self.url_entry = tk.Entry(form_frame, width=40)
+        self.url_entry.grid(row=0, column=1, pady=5)
+
+        # 정렬 기준
+        tk.Label(form_frame, text="리뷰 정렬 기준:").grid(row=1, column=0, padx=10, pady=5, sticky="e")
+        self.sort_option = ttk.Combobox(form_frame, values=["베스트순", "최신순"], state="readonly", width=37)
+        self.sort_option.current(0)
+        self.sort_option.grid(row=1, column=1, pady=5)
+
+        # 수집 리뷰 갯수
+        tk.Label(form_frame, text="수집 리뷰 갯수:").grid(row=2, column=0, padx=10, pady=5, sticky="e")
+        self.review_count = ttk.Combobox(form_frame, values=["100", "200", "300", "400", "500", "600", "700","800","900","1000","1100","1200","1300","1400","1500"], state="readonly", width=37)
         self.review_count.current(0)
-        self.review_count.pack(pady=5)
-        self.url_entry = tk.Entry(root, width=80)
-        self.url_entry.pack(pady=5)
+        self.review_count.grid(row=2, column=1, pady=5)
+
+        # 실행 버튼 예시
+        self.start_btn = tk.Button(root, text="리뷰 수집 시작")
+        # self.start_btn.pack(pady=10)
+        # self.review_count = ttk.Combobox(
+        #     root,
+        #     values=[str(i) for i in range(100, 1600, 100)],
+        #     state="readonly"
+        # )
+        # self.review_count.current(0)
+        # self.review_count.pack(pady=5)
+        # self.url_entry = tk.Entry(root, width=80)
+        # self.url_entry.pack(pady=5)
 
         self.start_button = tk.Button(root, text="리뷰 수집 시작", command=self.start_scraping)
         self.start_button.pack(pady=5)
@@ -70,11 +87,11 @@ class ReviewApp:
         self.log("리뷰 수집 시작...")
 
         try:
-            reviews = crawl_reviews(url, driver, log_func=self.log,sort=sort,count=count)
-            if reviews:
+            reviews ,product_name= crawl_reviews(url, driver, log_func=self.log,sort=sort,count=count)
+            if reviews and product_name:
                 self.log(f"총 수집된 리뷰 수: {len(reviews)}")
-                save_to_excel(reviews)
-                self.log("엑셀 저장 완료: coupang_reviews.xlsx")
+                save_to_excel(reviews,product_name)
+                self.log("엑셀 저장 완료: " + product_name)
             else:
                 self.log("리뷰를 수집하지 못했습니다.")
         except Exception as e:
@@ -91,13 +108,15 @@ def setup_driver():
     driver = uc.Chrome(options=options)
     return driver
 
-def save_to_excel(reviews, filename="coupang_reviews.xlsx"):
+def save_to_excel(reviews,priduct_name):
     wb = Workbook()
     ws = wb.active
+    today_str = datetime.today().strftime("%Y%m%d")
     ws.append(["작성자", "작성일", "평점", "리뷰 내용"])
     for r in reviews:
         ws.append([r["작성자"], r["작성일"], r["평점"], r["리뷰내용"]])
-    wb.save(filename)
+    wb.save(priduct_name + "_" +today_str + ".xlsx")
+    
     
 def get_review_totalcount(driver):        
         review_count_element = WebDriverWait(driver, 10).until(
@@ -153,6 +172,9 @@ def click_next_page(driver, current_page):
         except:
             current_page += 1  # 실패해도 무한루프 방지용 강제 증가
     return current_page
+
+
+
         
 
 def crawl_reviews(url,driver,log_func=print,sort="베스트순",count=100):
@@ -193,6 +215,12 @@ def crawl_reviews(url,driver,log_func=print,sort="베스트순",count=100):
         return []
 
     reviews = []
+    
+    try:
+        product_name = driver.find_element(By.XPATH, "//h1[contains(@class, 'product-title')]/span").text.strip()
+    except Exception:
+        product_name = "상품명 없음"
+        
     try:
         
         total_review_count = get_review_totalcount(driver)
@@ -240,18 +268,18 @@ def crawl_reviews(url,driver,log_func=print,sort="베스트순",count=100):
                 log_func(f"현재 수집한 리뷰 수: {len(reviews)} / 현재 페이지: {current_page}")
                 if len(reviews) >= max_review_count:
                     log_func("최대 리뷰 개수에 도달했습니다 크롤링을 종료합니다")
-                    return reviews
+                    return reviews , product_name
             current_page = click_next_page(driver, current_page)
     except Exception as e:
         driver.quit()
-        return reviews
+        return reviews , product_name
     finally:
         try:
             time.sleep(0.1)
             driver.close()
         except:
             pass
-        return reviews                             
+        return reviews,product_name                            
                 
                 
 if __name__ == "__main__":
